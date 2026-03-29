@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HabitPulse - 习惯追踪</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; touch-action: manipulation; background: #0f172a; }
+
+        /* GitHub-style contribution graph */
+        .contribution-graph {
+            display: grid;
+            grid-template-columns: repeat(53, 1fr);
+            gap: 3px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+
+        .contribution-cell {
+            aspect-ratio: 1;
+            min-width: 10px;
+            border-radius: 2px;
+            transition: all 0.15s ease;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .contribution-cell:hover {
+            transform: scale(1.2);
+            z-index: 10;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.3);
+        }
+
+        .contribution-cell:active {
+            transform: scale(0.9);
+        }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .category-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        /* Quick check card animations */
+        @keyframes pulse-green {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+        }
+
+        .quick-check-btn {
+            animation: pulse-green 2s infinite;
+        }
+
+        .habit-card {
+            transition: all 0.2s ease;
+        }
+
+        .habit-card:active {
+            transform: scale(0.96);
+        }
+
+        .habit-card.checked {
+            border-color: rgba(16, 185, 129, 0.5);
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        /* Hide scrollbar */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+
+        .btn-touch {
+            min-height: 44px;
+            min-width: 44px;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            margin-bottom: 4px;
+            z-index: 100;
+        }
+
+        .contribution-cell:hover .tooltip {
+            opacity: 1;
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(16, 185, 129, 0.95);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 24px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1000;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Edit mode overlay */
+        .edit-overlay {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .habit-card:hover .edit-overlay {
+            opacity: 1;
+        }
+    </style>
+<base target="_blank">
+</head>
+<body class="text-slate-100 min-h-screen pb-24">
+    <div id="app" class="container mx-auto px-4 py-6 max-w-5xl">
+        <!-- Header -->
+        <header class="mb-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                        HabitPulse
+                    </h1>
+                    <p class="text-slate-400 text-xs mt-1" id="todayDisplay"></p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="app.toggleEditMode()" id="editModeBtn" class="btn-touch px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm font-medium transition-colors border border-slate-700">
+                        管理
+                    </button>
+                    <button onclick="app.showAddCategory()" class="btn-touch px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-medium transition-colors">
+                        + 新建
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Combined Quick Check & Category Management -->
+        <section class="glass-panel rounded-2xl p-4 mb-4 animate-fade-in">
+            <div class="flex justify-between items-center mb-3">
+                <div>
+                    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">今日习惯打卡</h2>
+                    <p class="text-xs text-slate-500 mt-0.5" id="todayProgress">完成 0/0</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-500">点击卡片打卡</span>
+                </div>
+            </div>
+            <div id="habitCards" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                <!-- Habit cards rendered here -->
+            </div>
+        </section>
+
+        <!-- Filter -->
+        <section class="mb-4">
+            <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                <button onclick="app.setFilter('all')" id="filter-all" class="btn-touch px-4 py-2 rounded-full text-sm font-medium bg-slate-700 text-white transition-all whitespace-nowrap">
+                    全部
+                </button>
+                <div id="filterButtons" class="flex gap-2">
+                    <!-- Filter buttons rendered here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Annual Heatmap -->
+        <section class="glass-panel rounded-2xl p-4 mb-4 animate-fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-base font-semibold flex items-center gap-2">
+                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    <span id="yearDisplay">2026</span> 年度视图
+                </h2>
+                <div class="flex gap-1">
+                    <button onclick="app.changeYear(-1)" class="btn-touch p-2 hover:bg-slate-700 rounded-lg transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                    </button>
+                    <button onclick="app.changeYear(1)" class="btn-touch p-2 hover:bg-slate-700 rounded-lg transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Contribution Graph -->
+            <div class="overflow-x-auto no-scrollbar">
+                <div id="contributionGraph" class="contribution-graph min-w-full">
+                    <!-- Cells rendered here -->
+                </div>
+            </div>
+
+            <!-- Legend -->
+            <div class="mt-3 flex items-center justify-end gap-2 text-xs text-slate-400">
+                <span>少</span>
+                <div class="flex gap-1">
+                    <div class="w-3 h-3 rounded-sm bg-slate-800"></div>
+                    <div class="w-3 h-3 rounded-sm bg-slate-600"></div>
+                    <div class="w-3 h-3 rounded-sm bg-slate-400"></div>
+                    <div class="w-3 h-3 rounded-sm bg-slate-300"></div>
+                </div>
+                <span>多</span>
+            </div>
+        </section>
+
+        <!-- Monthly Detail -->
+        <section class="glass-panel rounded-2xl p-4 mb-4 animate-fade-in">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-base font-semibold">月度详情</h2>
+                <select id="monthSelector" onchange="app.selectMonth(this.value)" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                    <!-- Months rendered here -->
+                </select>
+            </div>
+            <div id="monthlyRecords" class="space-y-2 max-h-64 overflow-y-auto">
+                <!-- Monthly records rendered here -->
+            </div>
+        </section>
+
+        <!-- Stats -->
+        <section class="glass-panel rounded-2xl p-4 mb-4 animate-fade-in">
+            <h2 class="text-base font-semibold mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                统计概览
+            </h2>
+            <div class="grid grid-cols-3 gap-3">
+                <div class="bg-slate-800/50 rounded-xl p-3 text-center">
+                    <div class="text-xs text-slate-400 mb-1">活跃天数</div>
+                    <div class="text-xl font-bold text-blue-400" id="activeDays">0</div>
+                </div>
+                <div class="bg-slate-800/50 rounded-xl p-3 text-center">
+                    <div class="text-xs text-slate-400 mb-1">总计记录</div>
+                    <div class="text-xl font-bold text-purple-400" id="totalRecords">0</div>
+                </div>
+                <div class="bg-slate-800/50 rounded-xl p-3 text-center">
+                    <div class="text-xs text-slate-400 mb-1">最长连续</div>
+                    <div class="text-xl font-bold text-green-400" id="maxStreak">0</div>
+                    <div class="text-[10px] text-slate-500">天</div>
+                </div>
+            </div>
+            <div id="categoryStats" class="mt-3 space-y-2">
+                <!-- Category stats -->
+            </div>
+        </section>
+
+        <!-- Data Management (Bottom) -->
+        <section class="glass-panel rounded-2xl p-4 animate-fade-in">
+            <h2 class="text-base font-semibold mb-3 flex items-center gap-2 text-slate-300">
+                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                数据管理
+            </h2>
+            <div class="grid grid-cols-3 gap-2">
+                <button onclick="app.exportData('json')" class="btn-touch px-3 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-medium transition-colors border border-slate-700 flex flex-col items-center justify-center gap-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    导出JSON
+                </button>
+                <button onclick="app.exportData('csv')" class="btn-touch px-3 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-medium transition-colors border border-slate-700 flex flex-col items-center justify-center gap-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    导出CSV
+                </button>
+                <label class="btn-touch px-3 py-3 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-xl text-xs font-medium transition-colors border border-blue-600/30 flex flex-col items-center justify-center gap-1 cursor-pointer">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    导入数据
+                    <input type="file" id="importFile" accept=".json" class="hidden" onchange="app.importData(this)">
+                </label>
+            </div>
+        </section>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">打卡成功！</div>
+
+    <!-- Add/Edit Category Modal -->
+    <div id="categoryModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm">
+            <h3 id="categoryModalTitle" class="text-lg font-bold mb-4">新建习惯</h3>
+            <input type="hidden" id="editingCategoryId">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">习惯名称</label>
+                    <input type="text" id="categoryName" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 btn-touch" placeholder="例如：阅读30分钟">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-2">颜色标识</label>
+                    <div class="flex gap-3 flex-wrap justify-center">
+                        <button onclick="app.selectColor('#3b82f6')" class="w-10 h-10 rounded-full bg-blue-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#3b82f6"></button>
+                        <button onclick="app.selectColor('#10b981')" class="w-10 h-10 rounded-full bg-green-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#10b981"></button>
+                        <button onclick="app.selectColor('#f59e0b')" class="w-10 h-10 rounded-full bg-amber-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#f59e0b"></button>
+                        <button onclick="app.selectColor('#ef4444')" class="w-10 h-10 rounded-full bg-red-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#ef4444"></button>
+                        <button onclick="app.selectColor('#8b5cf6')" class="w-10 h-10 rounded-full bg-violet-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#8b5cf6"></button>
+                        <button onclick="app.selectColor('#ec4899')" class="w-10 h-10 rounded-full bg-pink-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#ec4899"></button>
+                        <button onclick="app.selectColor('#06b6d4')" class="w-10 h-10 rounded-full bg-cyan-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#06b6d4"></button>
+                        <button onclick="app.selectColor('#f97316')" class="w-10 h-10 rounded-full bg-orange-500 hover:scale-110 transition-transform color-option btn-touch" data-color="#f97316"></button>
+                    </div>
+                    <input type="hidden" id="selectedColor" value="#3b82f6">
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="app.closeCategoryModal()" class="flex-1 btn-touch px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors">取消</button>
+                <button onclick="app.saveCategory()" class="flex-1 btn-touch px-4 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors font-medium">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Day Detail Modal -->
+    <div id="dayModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl p-5 w-full max-w-sm max-h-[70vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="dayModalTitle" class="text-lg font-bold">记录详情</h3>
+                <button onclick="app.closeDayModal()" class="btn-touch p-2 text-slate-400 hover:text-white rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div id="dayRecords" class="space-y-3">
+                <!-- Records rendered here -->
+            </div>
+            <div class="mt-4 pt-4 border-t border-slate-800">
+                <button onclick="app.addRecordToDay()" class="btn-touch w-full px-4 py-3 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-xl transition-colors font-medium">
+                    + 添加记录
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class HabitApp {
+            constructor() {
+                this.currentYear = new Date().getFullYear();
+                this.selectedDate = null;
+                this.filter = 'all';
+                this.editMode = false;
+                this.data = this.loadData();
+                this.monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+                this.today = new Date();
+                this.todayKey = this.getDateKey(this.today.getFullYear(), this.today.getMonth(), this.today.getDate());
+                this.init();
+            }
+
+            init() {
+                this.updateTodayDisplay();
+                this.renderHabitCards();
+                this.renderFilterButtons();
+                this.renderContributionGraph();
+                this.renderMonthSelector();
+                this.renderMonthlyRecords();
+                this.renderStats();
+            }
+
+            updateTodayDisplay() {
+                const options = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
+                document.getElementById('todayDisplay').textContent = this.today.toLocaleDateString('zh-CN', options);
+            }
+
+            loadData() {
+                const saved = localStorage.getItem('habitData');
+                if (saved) {
+                    return JSON.parse(saved);
+                }
+                return {
+                    categories: [
+                        { id: '1', name: '阅读', color: '#3b82f6' },
+                        { id: '2', name: '运动', color: '#10b981' },
+                        { id: '3', name: '冥想', color: '#8b5cf6' }
+                    ],
+                    records: {}
+                };
+            }
+
+            saveData() {
+                localStorage.setItem('habitData', JSON.stringify(this.data));
+                this.renderStats();
+                this.renderHabitCards();
+            }
+
+            // Combined Quick Check & Category Management
+            toggleEditMode() {
+                this.editMode = !this.editMode;
+                const btn = document.getElementById('editModeBtn');
+                btn.textContent = this.editMode ? '完成' : '管理';
+                btn.classList.toggle('bg-blue-600', this.editMode);
+                btn.classList.toggle('bg-slate-800', !this.editMode);
+                this.renderHabitCards();
+            }
+
+            renderHabitCards() {
+                const container = document.getElementById('habitCards');
+                const todayRecords = this.data.records[this.todayKey] || [];
+
+                if (this.data.categories.length === 0) {
+                    container.innerHTML = `
+                        <div class="col-span-full text-center py-8">
+                            <p class="text-slate-500 mb-4">还没有习惯分类</p>
+                            <button onclick="app.showAddCategory()" class="btn-touch px-6 py-2 bg-blue-600 rounded-lg text-sm">创建第一个习惯</button>
+                        </div>
+                    `;
+                    document.getElementById('todayProgress').textContent = '完成 0/0';
+                    return;
+                }
+
+                let completedCount = 0;
+
+                container.innerHTML = this.data.categories.map(cat => {
+                    const existing = todayRecords.find(r => r.categoryId === cat.id);
+                    const count = existing ? existing.count : 0;
+                    const isCompleted = count > 0;
+                    if (isCompleted) completedCount++;
+
+                    if (this.editMode) {
+                        // Edit mode: show management options
+                        return `
+                            <div class="habit-card relative p-3 rounded-xl border-2 border-slate-700 bg-slate-800/50">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="w-3 h-3 rounded-full" style="background-color: ${cat.color}"></span>
+                                    <span class="font-medium text-sm truncate">${cat.name}</span>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="app.editCategory('${cat.id}')" class="flex-1 btn-touch py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs transition-colors">
+                                        编辑
+                                    </button>
+                                    <button onclick="app.deleteCategory('${cat.id}')" class="flex-1 btn-touch py-1.5 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-lg text-xs transition-colors">
+                                        删除
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Normal mode: quick check
+                        return `
+                            <button onclick="app.quickCheck('${cat.id}')" 
+                                    class="habit-card btn-touch relative w-full text-left p-3 rounded-xl border-2 transition-all ${isCompleted ? 'checked border-green-500/50' : 'border-slate-700 bg-slate-800/50 hover:border-slate-600'}">
+                                <div class="flex items-center justify-between mb-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${cat.color}"></span>
+                                        <span class="font-medium text-sm">${cat.name}</span>
+                                    </div>
+                                    ${isCompleted 
+                                        ? '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>' 
+                                        : ''
+                                    }
+                                </div>
+                                <div class="flex items-baseline gap-1">
+                                    <span class="text-2xl font-bold ${isCompleted ? 'text-green-400' : 'text-slate-600'}">${count}</span>
+                                    <span class="text-xs text-slate-500">次</span>
+                                </div>
+                                ${!isCompleted ? '<div class="absolute inset-0 rounded-xl quick-check-btn pointer-events-none opacity-0"></div>' : ''}
+                            </button>
+                        `;
+                    }
+                }).join('');
+
+                document.getElementById('todayProgress').textContent = `完成 ${completedCount}/${this.data.categories.length}`;
+            }
+
+            quickCheck(categoryId) {
+                if (this.editMode) return;
+
+                if (!this.data.records[this.todayKey]) {
+                    this.data.records[this.todayKey] = [];
+                }
+
+                const existing = this.data.records[this.todayKey].find(r => r.categoryId === categoryId);
+                if (existing) {
+                    existing.count++;
+                } else {
+                    this.data.records[this.todayKey].push({
+                        categoryId,
+                        count: 1
+                    });
+                }
+
+                this.saveData();
+                this.renderHabitCards();
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+                this.showToast('打卡成功！');
+            }
+
+            showToast(message) {
+                const toast = document.getElementById('toast');
+                toast.textContent = message;
+                toast.classList.add('show');
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 2000);
+            }
+
+            // Category Management
+            showAddCategory() {
+                document.getElementById('categoryModalTitle').textContent = '新建习惯';
+                document.getElementById('categoryName').value = '';
+                document.getElementById('editingCategoryId').value = '';
+                document.getElementById('selectedColor').value = '#3b82f6';
+                this.updateColorSelection('#3b82f6');
+                document.getElementById('categoryModal').classList.remove('hidden');
+                document.getElementById('categoryModal').classList.add('flex');
+            }
+
+            editCategory(id) {
+                const cat = this.data.categories.find(c => c.id === id);
+                if (!cat) return;
+                document.getElementById('categoryModalTitle').textContent = '编辑习惯';
+                document.getElementById('categoryName').value = cat.name;
+                document.getElementById('editingCategoryId').value = id;
+                document.getElementById('selectedColor').value = cat.color;
+                this.updateColorSelection(cat.color);
+                document.getElementById('categoryModal').classList.remove('hidden');
+                document.getElementById('categoryModal').classList.add('flex');
+            }
+
+            selectColor(color) {
+                document.getElementById('selectedColor').value = color;
+                this.updateColorSelection(color);
+            }
+
+            updateColorSelection(selectedColor) {
+                document.querySelectorAll('.color-option').forEach(btn => {
+                    if (btn.dataset.color === selectedColor) {
+                        btn.classList.add('ring-2', 'ring-white', 'ring-offset-2', 'ring-offset-slate-900', 'scale-110');
+                    } else {
+                        btn.classList.remove('ring-2', 'ring-white', 'ring-offset-2', 'ring-offset-slate-900', 'scale-110');
+                    }
+                });
+            }
+
+            closeCategoryModal() {
+                document.getElementById('categoryModal').classList.add('hidden');
+                document.getElementById('categoryModal').classList.remove('flex');
+            }
+
+            saveCategory() {
+                const name = document.getElementById('categoryName').value.trim();
+                const color = document.getElementById('selectedColor').value;
+                const editingId = document.getElementById('editingCategoryId').value;
+
+                if (!name) {
+                    alert('请输入习惯名称');
+                    return;
+                }
+
+                if (editingId) {
+                    const cat = this.data.categories.find(c => c.id === editingId);
+                    if (cat) {
+                        cat.name = name;
+                        cat.color = color;
+                    }
+                } else {
+                    this.data.categories.push({
+                        id: Date.now().toString(),
+                        name,
+                        color
+                    });
+                }
+
+                this.saveData();
+                this.renderHabitCards();
+                this.renderFilterButtons();
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+                this.closeCategoryModal();
+            }
+
+            deleteCategory(id) {
+                if (!confirm('确定要删除这个习惯吗？相关的所有记录也将被删除。')) return;
+                this.data.categories = this.data.categories.filter(c => c.id !== id);
+                Object.keys(this.data.records).forEach(dateKey => {
+                    this.data.records[dateKey] = this.data.records[dateKey].filter(r => r.categoryId !== id);
+                    if (this.data.records[dateKey].length === 0) {
+                        delete this.data.records[dateKey];
+                    }
+                });
+                this.saveData();
+                this.renderHabitCards();
+                this.renderFilterButtons();
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+            }
+
+            renderFilterButtons() {
+                const filterContainer = document.getElementById('filterButtons');
+                filterContainer.innerHTML = this.data.categories.map(cat => `
+                    <button onclick="app.setFilter('${cat.id}')" id="filter-${cat.id}" 
+                        class="btn-touch px-4 py-2 rounded-full text-sm font-medium bg-slate-800 text-slate-400 transition-all whitespace-nowrap">
+                        ${cat.name}
+                    </button>
+                `).join('');
+            }
+
+            setFilter(categoryId) {
+                this.filter = categoryId;
+                document.getElementById('filter-all').className = categoryId === 'all' 
+                    ? 'btn-touch px-4 py-2 rounded-full text-sm font-medium bg-slate-700 text-white transition-all whitespace-nowrap'
+                    : 'btn-touch px-4 py-2 rounded-full text-sm font-medium bg-slate-800 text-slate-400 transition-all whitespace-nowrap';
+
+                this.data.categories.forEach(cat => {
+                    const btn = document.getElementById(`filter-${cat.id}`);
+                    if (btn) {
+                        btn.className = categoryId === cat.id
+                            ? 'btn-touch px-4 py-2 rounded-full text-sm font-medium bg-slate-700 text-white transition-all whitespace-nowrap'
+                            : 'btn-touch px-4 py-2 rounded-full text-sm font-medium bg-slate-800 text-slate-400 transition-all whitespace-nowrap';
+                    }
+                });
+
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+                this.renderStats();
+            }
+
+            // Annual Contribution Graph
+            changeYear(delta) {
+                this.currentYear += delta;
+                document.getElementById('yearDisplay').textContent = this.currentYear;
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+                this.renderStats();
+            }
+
+            getDateKey(year, month, day) {
+                return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            }
+
+            getDayIntensity(dateKey) {
+                const records = this.data.records[dateKey] || [];
+                if (records.length === 0) return 0;
+
+                if (this.filter !== 'all') {
+                    const filtered = records.filter(r => r.categoryId === this.filter);
+                    if (filtered.length === 0) return 0;
+                    const total = filtered.reduce((sum, r) => sum + r.count, 0);
+                    return Math.min(total, 4);
+                }
+
+                const total = records.reduce((sum, r) => sum + r.count, 0);
+                return Math.min(total, 4);
+            }
+
+            getDayColor(dateKey) {
+                const records = this.data.records[dateKey] || [];
+                if (records.length === 0) return null;
+
+                if (this.filter !== 'all') {
+                    const cat = this.data.categories.find(c => c.id === this.filter);
+                    return cat ? cat.color : null;
+                }
+
+                const catCounts = {};
+                records.forEach(r => {
+                    catCounts[r.categoryId] = (catCounts[r.categoryId] || 0) + r.count;
+                });
+                const topCatId = Object.entries(catCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+                const cat = this.data.categories.find(c => c.id === topCatId);
+                return cat ? cat.color : '#3b82f6';
+            }
+
+            renderContributionGraph() {
+                const container = document.getElementById('contributionGraph');
+                const year = this.currentYear;
+                const startDate = new Date(year, 0, 1);
+                const endDate = new Date(year, 11, 31);
+
+                const startDay = startDate.getDay();
+                startDate.setDate(startDate.getDate() - startDay);
+
+                let html = '';
+
+                for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                    const dateKey = this.getDateKey(d.getFullYear(), d.getMonth(), d.getDate());
+                    const intensity = this.getDayIntensity(dateKey);
+                    const color = this.getDayColor(dateKey);
+                    const isCurrentYear = d.getFullYear() === year;
+                    const isToday = dateKey === this.todayKey;
+
+                    let bgColor = 'bg-slate-800';
+                    let opacity = '0.3';
+
+                    if (intensity > 0 && color && isCurrentYear) {
+                        const levels = ['0.3', '0.5', '0.7', '1'];
+                        opacity = levels[intensity - 1] || '1';
+                        bgColor = '';
+                    }
+
+                    const style = bgColor ? '' : `background-color: ${color}; opacity: ${opacity};`;
+                    const borderClass = isToday ? 'ring-1 ring-white' : '';
+
+                    if (!isCurrentYear) {
+                        html += `<div class="contribution-cell bg-slate-900/30"></div>`;
+                    } else {
+                        html += `
+                            <div onclick="app.openDayModal('${dateKey}')" 
+                                 class="contribution-cell ${bgColor} ${borderClass}"
+                                 style="${style}">
+                                <div class="tooltip">${d.getMonth() + 1}月${d.getDate()}日</div>
+                            </div>
+                        `;
+                    }
+                }
+
+                container.innerHTML = html;
+            }
+
+            // Monthly Records
+            renderMonthSelector() {
+                const selector = document.getElementById('monthSelector');
+                const currentMonth = this.today.getMonth();
+
+                selector.innerHTML = this.monthNames.map((name, idx) => 
+                    `<option value="${idx}" ${idx === currentMonth ? 'selected' : ''}>${this.currentYear}年${name}</option>`
+                ).join('');
+            }
+
+            selectMonth(monthIdx) {
+                this.renderMonthlyRecords(parseInt(monthIdx));
+            }
+
+            renderMonthlyRecords(monthIdx = this.today.getMonth()) {
+                const container = document.getElementById('monthlyRecords');
+                const year = this.currentYear;
+                const recordsByDay = {};
+
+                Object.entries(this.data.records).forEach(([dateKey, records]) => {
+                    if (dateKey.startsWith(`${year}-${String(monthIdx + 1).padStart(2, '0')}`)) {
+                        const day = parseInt(dateKey.split('-')[2]);
+                        if (!recordsByDay[day]) recordsByDay[day] = [];
+                        records.forEach(r => {
+                            const cat = this.data.categories.find(c => c.id === r.categoryId);
+                            if (this.filter === 'all' || r.categoryId === this.filter) {
+                                recordsByDay[day].push({ ...r, category: cat });
+                            }
+                        });
+                    }
+                });
+
+                const days = Object.keys(recordsByDay).sort((a, b) => b - a);
+
+                if (days.length === 0) {
+                    container.innerHTML = '<div class="text-center text-slate-500 py-8 text-sm">本月暂无记录<br>点击上方习惯卡片快速打卡</div>';
+                    return;
+                }
+
+                container.innerHTML = days.map(day => {
+                    const dayRecords = recordsByDay[day];
+                    const totalCount = dayRecords.reduce((sum, r) => sum + r.count, 0);
+                    const dateKey = `${year}-${String(monthIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+                    return `
+                        <div onclick="app.openDayModal('${dateKey}')" class="flex items-center justify-between bg-slate-800/50 rounded-xl p-3 cursor-pointer hover:bg-slate-800 transition-colors">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center font-bold text-sm">
+                                    ${day}
+                                </div>
+                                <div class="flex -space-x-1">
+                                    ${[...new Set(dayRecords.map(r => r.category?.color))].filter(Boolean).slice(0, 3).map(color => 
+                                        `<div class="w-2.5 h-2.5 rounded-full border-2 border-slate-800" style="background-color: ${color}"></div>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm text-slate-400">${totalCount} 次</span>
+                                <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // Day Modal
+            openDayModal(dateKey) {
+                this.selectedDate = dateKey;
+                const [year, month, day] = dateKey.split('-').map(Number);
+                document.getElementById('dayModalTitle').textContent = 
+                    `${year}年${month}月${day}日`;
+                this.renderDayRecords();
+                document.getElementById('dayModal').classList.remove('hidden');
+                document.getElementById('dayModal').classList.add('flex');
+            }
+
+            closeDayModal() {
+                document.getElementById('dayModal').classList.add('hidden');
+                document.getElementById('dayModal').classList.remove('flex');
+                this.selectedDate = null;
+            }
+
+            renderDayRecords() {
+                const container = document.getElementById('dayRecords');
+                const records = this.data.records[this.selectedDate] || [];
+                const filteredRecords = this.filter === 'all' 
+                    ? records 
+                    : records.filter(r => r.categoryId === this.filter);
+
+                if (filteredRecords.length === 0) {
+                    container.innerHTML = '<div class="text-center text-slate-500 py-8">点击"添加记录"开始追踪</div>';
+                    return;
+                }
+
+                container.innerHTML = filteredRecords.map((record, index) => {
+                    const cat = this.data.categories.find(c => c.id === record.categoryId);
+                    const actualIndex = records.indexOf(record);
+                    return `
+                        <div class="flex items-center justify-between bg-slate-800/50 rounded-xl p-3">
+                            <div class="flex items-center gap-3">
+                                <span class="w-3 h-3 rounded-full" style="background-color: ${cat?.color || '#666'}"></span>
+                                <span class="font-medium">${cat?.name || '未知分类'}</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="app.updateRecordCount(${actualIndex}, -1)" class="btn-touch w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition-colors text-lg">−</button>
+                                <span class="w-10 text-center font-bold text-lg">${record.count}</span>
+                                <button onclick="app.updateRecordCount(${actualIndex}, 1)" class="btn-touch w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center transition-colors text-lg">+</button>
+                                <button onclick="app.deleteRecord(${actualIndex})" class="btn-touch ml-1 p-2 text-red-400 hover:bg-red-900/30 rounded-lg transition-colors">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            addRecordToDay() {
+                if (!this.selectedDate) return;
+                if (this.data.categories.length === 0) {
+                    alert('请先创建习惯分类');
+                    return;
+                }
+
+                if (this.data.categories.length === 1) {
+                    this.addRecordWithCategory(this.data.categories[0].id);
+                } else {
+                    const catNames = this.data.categories.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
+                    const choice = prompt(`选择分类（输入数字）:\n${catNames}`);
+                    const idx = parseInt(choice) - 1;
+                    if (idx >= 0 && idx < this.data.categories.length) {
+                        this.addRecordWithCategory(this.data.categories[idx].id);
+                    }
+                }
+            }
+
+            addRecordWithCategory(categoryId) {
+                if (!this.data.records[this.selectedDate]) {
+                    this.data.records[this.selectedDate] = [];
+                }
+
+                const existing = this.data.records[this.selectedDate].find(r => r.categoryId === categoryId);
+                if (existing) {
+                    existing.count++;
+                } else {
+                    this.data.records[this.selectedDate].push({
+                        categoryId,
+                        count: 1
+                    });
+                }
+
+                this.saveData();
+                this.renderDayRecords();
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+                this.renderHabitCards();
+            }
+
+            updateRecordCount(index, delta) {
+                if (!this.selectedDate || !this.data.records[this.selectedDate]) return;
+                const record = this.data.records[this.selectedDate][index];
+                record.count = Math.max(0, record.count + delta);
+
+                if (record.count === 0) {
+                    this.data.records[this.selectedDate].splice(index, 1);
+                    if (this.data.records[this.selectedDate].length === 0) {
+                        delete this.data.records[this.selectedDate];
+                    }
+                }
+
+                this.saveData();
+                this.renderDayRecords();
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+                this.renderHabitCards();
+            }
+
+            deleteRecord(index) {
+                if (!this.selectedDate || !this.data.records[this.selectedDate]) return;
+                this.data.records[this.selectedDate].splice(index, 1);
+                if (this.data.records[this.selectedDate].length === 0) {
+                    delete this.data.records[this.selectedDate];
+                }
+                this.saveData();
+                this.renderDayRecords();
+                this.renderContributionGraph();
+                this.renderMonthlyRecords();
+                this.renderHabitCards();
+            }
+
+            // Statistics
+            renderStats() {
+                const year = this.currentYear;
+
+                let activeDays = 0;
+                let totalRecords = 0;
+                const catStats = {};
+
+                Object.entries(this.data.records).forEach(([dateKey, records]) => {
+                    if (dateKey.startsWith(String(year))) {
+                        const filtered = this.filter === 'all' 
+                            ? records 
+                            : records.filter(r => r.categoryId === this.filter);
+
+                        if (filtered.length > 0) {
+                            activeDays++;
+                            filtered.forEach(r => {
+                                totalRecords += r.count;
+                                if (!catStats[r.categoryId]) catStats[r.categoryId] = 0;
+                                catStats[r.categoryId] += r.count;
+                            });
+                        }
+                    }
+                });
+
+                document.getElementById('activeDays').textContent = activeDays;
+                document.getElementById('totalRecords').textContent = totalRecords;
+
+                const maxStreak = this.calculateMaxStreak(year);
+                document.getElementById('maxStreak').textContent = maxStreak;
+
+                const statsContainer = document.getElementById('categoryStats');
+                const sortedCats = Object.entries(catStats)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([catId, count]) => {
+                        const cat = this.data.categories.find(c => c.id === catId);
+                        return { cat, count };
+                    }).filter(item => item.cat);
+
+                if (sortedCats.length > 0) {
+                    statsContainer.innerHTML = sortedCats.map(({ cat, count }) => `
+                        <div class="flex items-center justify-between text-sm">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full" style="background-color: ${cat.color}"></span>
+                                <span class="text-slate-400">${cat.name}</span>
+                            </div>
+                            <span class="font-medium">${count} 次</span>
+                        </div>
+                    `).join('');
+                } else {
+                    statsContainer.innerHTML = '<div class="text-sm text-slate-500 text-center">暂无统计数据</div>';
+                }
+            }
+
+            calculateMaxStreak(year) {
+                let maxStreak = 0;
+                let currentStreak = 0;
+
+                const startDate = new Date(year, 0, 1);
+                const endDate = new Date(year, 11, 31);
+
+                for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                    const dateKey = this.getDateKey(d.getFullYear(), d.getMonth(), d.getDate());
+                    const records = this.data.records[dateKey] || [];
+                    const filtered = this.filter === 'all' 
+                        ? records 
+                        : records.filter(r => r.categoryId === this.filter);
+
+                    if (filtered.length > 0) {
+                        currentStreak++;
+                        maxStreak = Math.max(maxStreak, currentStreak);
+                    } else {
+                        currentStreak = 0;
+                    }
+                }
+
+                return maxStreak;
+            }
+
+            // Export/Import
+            exportData(format) {
+                if (format === 'json') {
+                    const dataStr = JSON.stringify(this.data, null, 2);
+                    const blob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `habit-data-${this.currentYear}-${new Date().toISOString().split('T')[0]}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } else if (format === 'csv') {
+                    let csv = '日期,分类,计数\n';
+                    Object.entries(this.data.records).forEach(([date, records]) => {
+                        records.forEach(r => {
+                            const cat = this.data.categories.find(c => c.id === r.categoryId);
+                            csv += `${date},${cat?.name || '未知'},${r.count}\n`;
+                        });
+                    });
+                    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `habit-data-${this.currentYear}-${new Date().toISOString().split('T')[0]}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            }
+
+            importData(input) {
+                const file = input.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        if (data.categories && data.records) {
+                            if (confirm('导入将覆盖现有数据，确定继续？')) {
+                                this.data = data;
+                                this.saveData();
+                                this.renderHabitCards();
+                                this.renderFilterButtons();
+                                this.renderContributionGraph();
+                                this.renderMonthlyRecords();
+                                this.renderStats();
+                                alert('数据导入成功！');
+                            }
+                        } else {
+                            alert('无效的数据格式');
+                        }
+                    } catch (err) {
+                        alert('导入失败：' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+                input.value = '';
+            }
+        }
+
+        const app = new HabitApp();
+    </script>
+</body>
+</html>
